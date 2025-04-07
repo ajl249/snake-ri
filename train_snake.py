@@ -4,6 +4,10 @@ import numpy as np
 import os
 import time
 
+# Enable eager execution and TF2 behavior
+tf.compat.v1.enable_eager_execution()
+tf.config.run_functions_eagerly(True)
+
 from tf_agents.agents.dqn import dqn_agent
 from tf_agents.drivers import dynamic_step_driver
 from tf_agents.environments import tf_py_environment
@@ -168,7 +172,8 @@ for i in range(num_iterations):
     # Log training information
     if step % log_interval == 0:
         if train_loss is not None:
-            print(f'step = {step}, loss = {train_loss.numpy():.4f}, epsilon = {agent._epsilon_greedy:.3f}')
+            epsilon = agent._epsilon_greedy() if callable(agent._epsilon_greedy) else agent._epsilon_greedy
+            print(f'step = {step}, loss = {train_loss.numpy():.4f}, epsilon = {float(epsilon):.3f}')
         else:
             print(f'step = {step}, loss = (Skipped - Replay buffer not full enough)')
 
