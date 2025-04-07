@@ -13,9 +13,10 @@ tf.compat.v1.enable_v2_behavior() # Make sure TF2 behavior is enabled
 
 class SnakeEnv(py_environment.PyEnvironment):
 
-    def __init__(self):
+    def __init__(self, render_during_step=False):
         super().__init__()
-        self._game = SnakeGame() # Initialize the game internally
+        # Pass the flag to the game instance
+        self._game = SnakeGame(render=render_during_step)
 
         # Define action spec: 4 discrete actions (0: UP, 1: DOWN, 2: LEFT, 3: RIGHT)
         self._action_spec = array_spec.BoundedArraySpec(
@@ -65,7 +66,7 @@ class SnakeEnv(py_environment.PyEnvironment):
         # This logic is now handled inside snake_game._move,
         # so we can directly pass the action.
 
-        # Step the game
+        # Step the game - it now returns (state, reward, done)
         self._state, reward, done = self._game.step(action_int)
 
         # Convert reward to float32

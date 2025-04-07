@@ -32,13 +32,17 @@ class Direction:
     DOWN = 3
 
 class SnakeGame:
-    def __init__(self, w=WIDTH, h=HEIGHT):
+    def __init__(self, w=WIDTH, h=HEIGHT, render=True):
         self.w = w
         self.h = h
-        # Init display
-        self.display = pygame.display.set_mode((self.w, self.h))
-        pygame.display.set_caption('Snake RL')
-        self.clock = pygame.time.Clock()
+        self.render = render # Store the flag
+        if self.render: # Only initialize display if rendering
+            self.display = pygame.display.set_mode((self.w, self.h))
+            pygame.display.set_caption('Snake RL')
+            self.clock = pygame.time.Clock()
+        else:
+            self.display = None
+            self.clock = None # No clock needed if not rendering/ticking
         self.reset()
 
     def reset(self):
@@ -113,9 +117,11 @@ class SnakeGame:
         return False
 
     def _update_ui(self):
-        """Draw the current game state."""
-        self.display.fill(BLACK)
+        """Draw the current game state only if rendering is enabled."""
+        if not self.render: # Check the flag
+            return
 
+        self.display.fill(BLACK)
         for pt in self.snake:
             pygame.draw.rect(self.display, BLUE1, pygame.Rect(pt.x, pt.y, BLOCK_SIZE, BLOCK_SIZE))
             pygame.draw.rect(self.display, BLUE2, pygame.Rect(pt.x + 4, pt.y + 4, 12, 12))
@@ -176,48 +182,53 @@ class SnakeGame:
     def step(self, action):
         """
         Take an action, update the game, return (new_state, reward, done_flag).
-        Action mapping: 0: UP, 1: DOWN, 2: LEFT, 3: RIGHT
-        Reward: +10 food, -10 collision, -0.1 move
         """
         self.frame_iteration += 1
 
-        # 1. Handle quit event
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                pygame.quit()
-                quit()
+        # 1. Handle quit event (only relevant if rendering)
+        if self.render:
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    quit()
 
         # 2. Move snake
         self._move(action) # Action is 0, 1, 2, or 3
 
-        # 3. Check for game over
-        reward = -0.1 # Small negative reward for each step
+        # 3. Check for game over conditions
+        reward = -0.01 # Small negative reward for each step
         self.game_over = False
-        # Optional: Add timeout condition
-        # if self.frame_iteration > 100 * len(self.snake):
-        #     self.game_over = True
-        #     reward = -10.0
-        #     return self.get_state(), reward, self.game_over
 
+        # Add timeout condition
+        if self.frame_iteration > 150 * (len(self.snake) + 1):
+            self.game_over = True
+            reward = -1.0 # Negative reward for timeout
+            current_state = self.get_state()
+            return current_state, reward, self.game_over
+
+        # Check collision
         if self._is_collision():
             self.game_over = True
-            reward = -10.0 # Large negative reward for collision
-            return self.get_state(), reward, self.game_over
+            reward = -1.0 # Negative reward for collision
+            current_state = self.get_state()
+            return current_state, reward, self.game_over
 
         # 4. Check for food
         if self.head == self.food:
             self.score += 1
-            reward = 10.0 # Large positive reward for eating food
+            reward = 1.0 # Positive reward for eating food
             self._place_food()
         else:
-            self.snake.pop() # Remove tail if no food eaten
+            self.snake.pop()
 
-        # 5. Update UI
-        self._update_ui()
-        self.clock.tick(SPEED) # Control game speed
+        # 5. Update UI & Clock (only if rendering)
+        if self.render:
+            self._update_ui()
+            self.clock.tick(SPEED)
 
         # 6. Return state, reward, done
-        return self.get_state(), reward, self.game_over
+        current_state = self.get_state()
+        return current_state, reward, self.game_over
 
 # --- Main execution block for human play ---
 if __name__ == '__main__':
