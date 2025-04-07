@@ -1,84 +1,107 @@
 # evaluate_snake.py
 import tensorflow as tf
-import pygame # Need pygame for visualization
+import numpy as np
+import os
 import time
-import os # Import os for path joining
+import pygame
+import sys
 
-from tf_agents.environments import tf_py_environment
-from tf_agents.policies import policy_loader # To load the saved policy
+# Enable eager execution
+tf.compat.v1.enable_eager_execution()
 
-# Import the custom Python environment (not the TF wrapper this time)
+from tf_agents.policies import policy_saver
+from tf_agents.trajectories import time_step as ts
 from rl_environment import SnakeEnv
-import snake_game # Need access to game constants like SPEED
 
-# --- Configuration ---
-policy_dir = os.path.join(os.getcwd(), "saved_policy") # Directory where the policy was saved
-num_episodes = 5 # Number of episodes to visualize
-frame_delay = 0.05 # Delay between frames in seconds for visualization speed
+def evaluate_policy(policy, env, num_episodes=5):
+    """Evaluate the policy for a given number of episodes."""
+    total_reward = 0
+    total_steps = 0
+    
+    for episode in range(1, num_episodes + 1):
+        print(f"\nStarting Episode {episode}/{num_episodes}")
+        episode_reward = 0
+        episode_steps = 0
+        
+        # Reset environment
+        time_step = env.reset()
+        # Add batch dimension to observation
+        current_observation = tf.expand_dims(time_step.observation, 0)
+        time_step = ts.TimeStep(
+            step_type=tf.expand_dims(time_step.step_type, 0),
+            reward=tf.expand_dims(time_step.reward, 0),
+            discount=tf.expand_dims(time_step.discount, 0),
+            observation=current_observation
+        )
+        
+        while not time_step.is_last()[0]:  # Check first element of batch
+            # Get action from policy
+            action_step = policy.action(time_step)
+            action = action_step.action.numpy()[0]  # Get first action from batch
+            
+            # Take step in environment
+            time_step = env.step(action)
+            # Add batch dimension to observation
+            current_observation = tf.expand_dims(time_step.observation, 0)
+            time_step = ts.TimeStep(
+                step_type=tf.expand_dims(time_step.step_type, 0),
+                reward=tf.expand_dims(time_step.reward, 0),
+                discount=tf.expand_dims(time_step.discount, 0),
+                observation=current_observation
+            )
+            
+            reward = time_step.reward.numpy()[0]  # Get first reward from batch
+            episode_reward += reward
+            episode_steps += 1
+            
+            # Render the game using the underlying game instance
+            env._game._update_ui()
+            pygame.time.delay(50)  # Add small delay for visualization
+            
+            # Handle Pygame events
+            for event in pygame.event.get():
+                if event.type == pygame.QUIT:
+                    pygame.quit()
+                    return
+            
+        total_reward += episode_reward
+        total_steps += episode_steps
+        
+        print(f"Episode {episode} finished:")
+        print(f"  Steps: {episode_steps}")
+        print(f"  Reward: {episode_reward:.2f}")
+    
+    avg_reward = total_reward / num_episodes
+    avg_steps = total_steps / num_episodes
+    
+    print(f"\nEvaluation completed over {num_episodes} episodes:")
+    print(f"Average steps per episode: {avg_steps:.2f}")
+    print(f"Average reward per episode: {avg_reward:.2f}")
+    
+    return avg_reward, avg_steps
 
-# --- Load Environment ---
-# We need the original Python environment to manually control rendering/stepping
-eval_py_env = SnakeEnv()
-# We still wrap it slightly to easily get TF specs if needed, but won't use it for stepping
-eval_tf_env = tf_py_environment.TFPyEnvironment(eval_py_env)
-
-# --- Load Policy ---
-print(f"Loading policy from: {policy_dir}")
-saved_policy = tf.saved_model.load(policy_dir)
-print("Policy loaded.")
-
-# --- Evaluation Loop ---
-for episode in range(num_episodes):
-    print(f"\nStarting Episode {episode + 1}/{num_episodes}")
-    time_step = eval_tf_env.reset() # Use TF env just for reset convenience
-    episode_return = 0.0
-    steps = 0
-
-    # Get the initial Pygame display surface from the underlying game
-    # display_surface = eval_py_env._game.display # Not directly needed
-
-    while not time_step.is_last():
-        # Get action from the loaded policy
-        # The policy requires a TimeStep object with batch dimension
-        action_step = saved_policy.action(time_step)
-        action = action_step.action.numpy()[0] # Extract action (remove batch dim)
-
-        # Step the *Python* environment manually using the underlying game
-        # We need the raw state, reward, done from the game's step method
-        state, reward, done = eval_py_env._game.step(action)
-        episode_return += reward
-        steps += 1
-
-        # Update the Pygame display (this is done inside _game.step)
-        # No need to call _update_ui() separately
-
-        # Construct the next TimeStep manually for the policy's next input
-        # Note: We need to wrap the state numpy array for the TimeStep
-        # Convert state back to TF Tensor with batch dimension
-        current_observation = tf.convert_to_tensor([state], dtype=tf.float32)
-
-        if done:
-            # Create a termination TimeStep
-            time_step = ts.termination(current_observation, reward)
-        else:
-            # Create a transition TimeStep
-            time_step = ts.transition(current_observation, reward=reward, discount=1.0)
-
-
-        # Add a small delay for visualization
-        time.sleep(frame_delay)
-
-        # Optional: Handle Pygame events like closing the window during evaluation
-        for event in pygame.event.get():
-            if event.type == pygame.QUIT:
-                print("Pygame window closed during evaluation.")
-                pygame.quit()
-                exit() # Exit the script if window is closed
-
-    print(f"Episode finished. Return = {episode_return}, Steps = {steps}")
-    # No need to access _game.score directly, episode_return reflects reward sum
-    # print(f"Episode finished. Score: {eval_py_env._game.score}, Return = {episode_return}, Steps = {steps}")
-
-
-print("\nEvaluation finished.")
-pygame.quit() # Close the Pygame window cleanly at the end 
+def main():
+    # Initialize environment
+    env = SnakeEnv(render_during_step=True)
+    
+    # Load saved policy
+    policy_dir = os.path.join(os.getcwd(), 'saved_policy')
+    print(f"Loading policy from: {policy_dir}")
+    
+    if not os.path.exists(policy_dir):
+        print(f"Error: Policy directory not found at {policy_dir}")
+        print("Please train the agent first using train_snake.py")
+        sys.exit(1)
+    
+    # Load the saved policy
+    policy = tf.saved_model.load(policy_dir)
+    print("Policy loaded.\n")
+    
+    # Evaluate policy
+    evaluate_policy(policy, env)
+    
+    # Clean up
+    pygame.quit()
+    
+if __name__ == "__main__":
+    main() 
